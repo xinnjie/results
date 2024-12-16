@@ -3,10 +3,10 @@ package taskrun
 import (
 	"context"
 	"fmt"
+	"io"
 	"text/tabwriter"
 	"text/template"
 
-	"github.com/tektoncd/cli/pkg/cli"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	pipelinev1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"k8s.io/apimachinery/pkg/util/json"
@@ -64,11 +64,7 @@ List all TaskRuns in 'default' namespace:
 			if err != nil {
 				return fmt.Errorf("failed to list TaskRuns from namespace %s: %v", opts.Namespace, err)
 			}
-			stream := &cli.Stream{
-				Out: cmd.OutOrStdout(),
-				Err: cmd.OutOrStderr(),
-			}
-			return printFormatted(stream, resp.Records, params.Clock)
+			return printFormatted(cmd.OutOrStdout(), resp.Records, params.Clock)
 		},
 	}
 	cmd.Flags().StringVarP(&opts.Namespace, "namespace", "n", "default", "Namespace to list TaskRuns in")
@@ -94,7 +90,7 @@ func taskRunFromRecord(record *pb.Record) (*pipelinev1.TaskRun, error) {
 	return tr, nil
 }
 
-func printFormatted(s *cli.Stream, records []*pb.Record, c clockwork.Clock) error {
+func printFormatted(out io.Writer, records []*pb.Record, c clockwork.Clock) error {
 	var data = struct {
 		TaskRuns []*pipelinev1.TaskRun
 		Time     clockwork.Clock
@@ -117,7 +113,7 @@ func printFormatted(s *cli.Stream, records []*pb.Record, c clockwork.Clock) erro
 		"formatCondition": formatted.Condition,
 	}
 
-	w := tabwriter.NewWriter(s.Out, 0, 5, 3, ' ', tabwriter.TabIndent)
+	w := tabwriter.NewWriter(out, 0, 5, 3, ' ', tabwriter.TabIndent)
 	t := template.Must(template.New("List TaskRuns").Funcs(funcMap).Parse(listTemplate))
 
 	err := t.Execute(w, data)

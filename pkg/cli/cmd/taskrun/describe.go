@@ -2,6 +2,7 @@ package taskrun
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"text/tabwriter"
 	"text/template"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
-	"github.com/tektoncd/cli/pkg/cli"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/results/pkg/cli/flags"
 	pb "github.com/tektoncd/results/proto/v1alpha2/results_go_proto"
@@ -54,18 +54,14 @@ tkn-results taskrun describe -n foo taskrun-hello -n 3
 				return fmt.Errorf("no TaskRun found with name %s in namespace %s", taskrunName, opts.Namespace)
 			}
 
-			stream := &cli.Stream{
-				Out: cmd.OutOrStdout(),
-				Err: cmd.OutOrStderr(),
-			}
-			return taskrunDescription(stream, resp.Records[0], params.Clock)
+			return taskrunDescription(cmd.OutOrStdout(), resp.Records[0], params.Clock)
 		},
 	}
 	cmd.Flags().StringVarP(&opts.Namespace, "namespace", "n", "default", "Namespace to describe TaskRuns in")
 	return cmd
 }
 
-func taskrunDescription(s *cli.Stream, record *pb.Record, c clockwork.Clock) error {
+func taskrunDescription(out io.Writer, record *pb.Record, c clockwork.Clock) error {
 	tr, err := taskRunFromRecord(record)
 	if err != nil {
 		return err
@@ -95,7 +91,7 @@ func taskrunDescription(s *cli.Stream, record *pb.Record, c clockwork.Clock) err
 		"removeLastAppliedConfig": formatted.RemoveLastAppliedConfig,
 	}
 
-	w := tabwriter.NewWriter(s.Out, 0, 5, 3, ' ', tabwriter.TabIndent)
+	w := tabwriter.NewWriter(out, 0, 5, 3, ' ', tabwriter.TabIndent)
 	t := template.Must(template.New("Describe TaskRun").Funcs(funcMap).Parse(templ))
 
 	err = t.Execute(w, data)

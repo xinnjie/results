@@ -1,14 +1,16 @@
 package taskrun
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/spf13/cobra"
 	"github.com/tektoncd/results/pkg/cli/flags"
+	pb "github.com/tektoncd/results/proto/v1alpha2/results_go_proto"
 )
 
 type logsOptions struct {
-	Namespace   string
-	TaskRunName string
-	StepName    string
+	Namespace string
 }
 
 func logsCommand(params *flags.Params) *cobra.Command {
@@ -21,10 +23,6 @@ func logsCommand(params *flags.Params) *cobra.Command {
 Show the live logs of TaskRun named 'foo' from namespace 'bar':
 
     tkn-results taskrun logs -f foo -n bar
-
-Show the logs of TaskRun named 'microservice-1' for step 'build' only from namespace 'bar':
-
-    tkn-results tr logs microservice-1 -s build -n bar
 `
 	cmd := &cobra.Command{
 		Use:     "logs",
@@ -34,29 +32,45 @@ Show the logs of TaskRun named 'microservice-1' for step 'build' only from names
 			"commandType": "main",
 		},
 		Example: eg,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			// if opts.Limit < 0 {
-			// 	return fmt.Errorf("limit was %d, but must be greater than 0", opts.Limit)
-			// }
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskrunName := args[0]
 
-			// resp, err := params.ResultsClient.ListRecords(cmd.Context(), &pb.ListRecordsRequest{
-			// 	Parent:   fmt.Sprintf("%s/results/-", opts.Namespace),
-			// 	PageSize: int32(opts.Limit),
-			// 	Filter:   `data_type==TASK_RUN`,
-			// })
-			// if err != nil {
-			// 	return fmt.Errorf("failed to list TaskRuns from namespace %s: %v", opts.Namespace, err)
-			// }
-			// stream := &cli.Stream{
-			// 	Out: cmd.OutOrStdout(),
-			// 	Err: cmd.OutOrStderr(),
-			// }
-			// return printFormatted(stream, resp.Records, params.Clock)
-			return nil
+			resp, err := params.ResultsClient.ListRecords(cmd.Context(), &pb.ListRecordsRequest{
+				Parent:   fmt.Sprintf("%s/results/-", opts.Namespace),
+				PageSize: 5,
+				Filter:   fmt.Sprintf(`data_type==TASK_RUN && data.metadata.name=="%s" && data.metadata.namespace=="%s"`, taskrunName, opts.Namespace),
+				OrderBy:  "create_time",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to list TaskRuns from namespace %s of name %s: %v", opts.Namespace, taskrunName, err)
+			}
+
+			if len(resp.Records) == 0 {
+				return fmt.Errorf("no TaskRun found with name %s in namespace %s", taskrunName, opts.Namespace)
+			}
+
+			record := resp.Records[0]
+
+			logName := strings.ReplaceAll(record.GetName(), "records", "logs")
+
+			stream, err := params.LogsClient.GetLog(cmd.Context(), &pb.GetLogRequest{
+				Name: logName,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to get logs for TaskRun %s in namespace %s: %v", taskrunName, opts.Namespace, err)
+			}
+			data, err := stream.Recv()
+			if err != nil {
+				return fmt.Errorf("failed to receive steaming logs for TaskRun %s in namespace %s: %v", taskrunName, opts.Namespace, err)
+			}
+
+			if data.ContentType != "text/plain" {
+				return fmt.Errorf("unsupported content type: %s", data.ContentType)
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), string(data.Data))
+			return err
 		},
 	}
 	cmd.Flags().StringVarP(&opts.Namespace, "namespace", "n", "default", "Namespace to list TaskRuns in")
-	cmd.Flags().StringVarP(&opts.TaskRunName, "taskrun", "t", "", "Name of the TaskRun to show logs for")
-	cmd.Flags().StringVarP(&opts.StepName, "step", "s", "", "Name of the step to show logs for")
 	return cmd
 }
